@@ -57,7 +57,7 @@ def _run(
     seed: int,
 ):
     if not prompt.strip():
-        raise gr.Error("Prompt를 입력하세요.")
+        raise gr.Error("Please enter a prompt.")
 
     config = DragConfig(
         height=int(height),
@@ -72,13 +72,13 @@ def _run(
     handles = parse_points(handle_points_text)
     targets = parse_points(target_points_text)
     if len(handles) == 0 or len(handles) != len(targets):
-        raise gr.Error("handle/target 좌표 개수를 맞춰 입력하세요. 예: 180,220;250,220")
+        raise gr.Error("Please enter the same number of handle and target points. Example: 180,220;250,220")
 
     image_tensor = None
     source_pil = None
     if mode == "real":
         if image is None:
-            raise gr.Error("Real Image 모드에서는 입력 이미지가 필요합니다.")
+            raise gr.Error("Real Image mode requires an input image.")
         source_pil = pil_to_rgb(image, (config.width, config.height))
         image_tensor = pil_to_tensor(source_pil, str(bundle.device), bundle.dtype)
 
@@ -98,26 +98,52 @@ def _run(
     save_message = _save_result(result, config)
     torch.cuda.empty_cache()
 
-    return result.get("source_image", source_pil), result["edited_image"], json.dumps(result["logs"], indent=2), save_message
+    return result.get("source_image", source_pil), result["edited_image"], save_message
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(title="DragDiffusion Reproduction") as demo:
+    css = """
+    .work-title {
+        text-align: center;
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 0.4rem 0 0.8rem;
+    }
+    .compact-note {
+        color: #a8b3c7;
+        font-size: 0.92rem;
+        margin-top: -0.2rem;
+    }
+    .primary-run button {
+        min-height: 48px;
+        font-weight: 700;
+    }
+    """
+
+    with gr.Blocks(title="DragDiffusion Reproduction", css=css) as demo:
         gr.Markdown("# DragDiffusion Reproduction")
-        gr.Markdown("Colab T4 기준 간단 UI입니다. 좌표는 원본 이미지 픽셀 기준 `x,y; x,y` 형식으로 입력합니다.")
+        gr.Markdown(
+            "Colab T4 friendly UI for point-based editing. "
+            "Points are entered as original image pixel coordinates: `x,y; x,y`."
+        )
 
         with gr.Row():
-            with gr.Column():
+            with gr.Column(scale=1):
+                gr.Markdown("<div class='work-title'>Input</div>")
                 mode = gr.Radio(
                     choices=[("Generated Image", "generated"), ("Real Image", "real")],
                     value="generated",
                     label="Mode",
                 )
-                image = gr.Image(type="pil", label="Input image (Real mode)")
-                mask = gr.Image(type="pil", label="Mask PNG (white = editable, optional)")
+                image = gr.Image(type="pil", label="Real image upload")
+                mask = gr.Image(type="pil", label="Mask PNG (white = editable)")
                 prompt = gr.Textbox(value="a photo of a cat", label="Prompt")
+
+            with gr.Column(scale=1):
+                gr.Markdown("<div class='work-title'>Points & Settings</div>")
                 handle_points = gr.Textbox(value="180,220", label="Handle points")
                 target_points = gr.Textbox(value="250,220", label="Target points")
+                gr.Markdown("<div class='compact-note'>Multiple points: `180,220;210,240`</div>")
 
                 with gr.Row():
                     height = gr.Dropdown([384, 512], value=384, label="Resolution")
@@ -126,12 +152,12 @@ def build_demo() -> gr.Blocks:
                     lora_steps = gr.Slider(0, 80, value=50, step=1, label="LoRA steps")
                     drag_steps = gr.Slider(1, 80, value=50, step=1, label="Drag steps")
 
-                run_btn = gr.Button("Run", variant="primary")
+                run_btn = gr.Button("Run Editing", variant="primary", elem_classes=["primary-run"])
 
-            with gr.Column():
+            with gr.Column(scale=1):
+                gr.Markdown("<div class='work-title'>Result</div>")
                 source = gr.Image(type="pil", label="Source / Generated")
                 edited = gr.Image(type="pil", label="Edited result")
-                logs = gr.Textbox(label="Logs", lines=12)
                 saved = gr.Textbox(label="Save status")
 
         run_btn.click(
@@ -148,7 +174,7 @@ def build_demo() -> gr.Blocks:
                 drag_steps,
                 seed,
             ],
-            outputs=[source, edited, logs, saved],
+            outputs=[source, edited, saved],
         )
 
     return demo
