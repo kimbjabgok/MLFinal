@@ -85,9 +85,10 @@ def encode_prompt(bundle: ModelBundle, prompt: str) -> torch.Tensor:
         truncation=True,
         return_tensors="pt",
     ).input_ids.to(bundle.device)
-    return bundle.text_encoder(tokens)[0].to(dtype=bundle.dtype)
+    with torch.no_grad():
+        embeds = bundle.text_encoder(tokens)[0]
+    return embeds.to(dtype=bundle.dtype).detach()
 
 
 def encode_empty_prompt(bundle: ModelBundle) -> torch.Tensor:
     return encode_prompt(bundle, "")
-
