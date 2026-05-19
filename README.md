@@ -65,7 +65,7 @@ Implemented:
 
 - Gradio UI
 - image/mask/point preprocessing
-- SD 1.5 loader with fp16, xformers fallback, VAE slicing, optional CPU offload
+- SD 1.5 loader with fp16, xformers fallback, and VAE slicing
 - Generated Image mode with intermediate latent caching
 - Real Image mode path with LoRA fine-tuning and DDIM inversion
 - latent optimization with motion supervision

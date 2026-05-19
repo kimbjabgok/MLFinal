@@ -26,7 +26,7 @@ class DragConfig:
     guidance_scale_real: float = 1.0
     guidance_scale_generated: float = 7.5
     use_xformers: bool = True
-    cpu_offload: bool = True
+    cpu_offload: bool = False
     model_id: str = "runwayml/stable-diffusion-v1-5"
     device: str = "cuda"
     dtype: str = "float16"
@@ -43,4 +43,3 @@ class EditRequest:
     handle_points: list[tuple[int, int]] = field(default_factory=list)
     target_points: list[tuple[int, int]] = field(default_factory=list)
     config: DragConfig = field(default_factory=DragConfig)
-

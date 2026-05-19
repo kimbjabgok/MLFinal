@@ -65,6 +65,7 @@ def _run(
         lora_steps=int(lora_steps),
         drag_steps=int(drag_steps),
         seed=int(seed),
+        cpu_offload=False,
     )
     bundle = _get_model(config)
     latent_hw = (config.height // 8, config.width // 8)

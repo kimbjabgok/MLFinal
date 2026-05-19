@@ -87,3 +87,6 @@ Generated Image 모드가 정상 동작한 뒤 Real Image 모드로 넘어갑니
 
 OOM이 나면 LoRA steps, Drag steps를 낮추고, 런타임을 재시작한 뒤 다시 실행합니다.
 
+Note: CPU offload is disabled for this project because latent optimization needs
+backpropagation through the UNet. Offloading can place UNet weights on CPU while
+the optimized latent is on CUDA, which breaks `loss.backward()`.
