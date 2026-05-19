@@ -89,12 +89,13 @@ def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
         original_latent_zt = latent_zt.detach().clone()
         source_image = generated_image
         guidance_scale = config.guidance_scale_generated
+        denoise_start_index = config.target_timestep_index
     else:
         if request.image is None:
             raise ValueError("Real image mode requires an image tensor.")
         latent_z0 = image_to_latent(bundle, request.image)
         finetune_lora(bundle, latent_z0, request.prompt, config)
-        latent_zt, _ = ddim_invert(
+        latent_zt, _, denoise_start_index = ddim_invert(
             bundle,
             latent_z0,
             request.prompt,
@@ -121,7 +122,7 @@ def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
         latents=optimized_latent,
         reference_latents=original_latent_zt,
         prompt=request.prompt,
-        start_index=config.target_timestep_index,
+        start_index=denoise_start_index,
         guidance_scale=guidance_scale,
     )
 

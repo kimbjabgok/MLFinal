@@ -43,17 +43,18 @@ def ddim_invert(
     prompt: str,
     target_timestep_index: int,
     guidance_scale: float = 1.0,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Approximate DDIM inversion from z0 to z_t.
 
-    Returns the latent at the requested index and the previous clean-side latent
-    used by the mask preservation loss.
+    Returns the latent at the requested index, the previous clean-side latent,
+    and the matching scheduler index to use when denoising back to z0.
     """
 
     scheduler = bundle.scheduler
-    timesteps = list(reversed(scheduler.timesteps))
+    denoise_timesteps = list(scheduler.timesteps)
+    timesteps = list(reversed(denoise_timesteps))
     latents = latent_z0
-    target = min(target_timestep_index, len(timesteps) - 1)
+    target = min(max(target_timestep_index, 0), len(timesteps) - 1)
     ref_prev = latent_z0
 
     for index, timestep in enumerate(timesteps[: target + 1]):
@@ -71,5 +72,5 @@ def ddim_invert(
         ref_prev = latents
         latents = alpha_prod_next.sqrt() * pred_original + direction
 
-    return latents.detach(), ref_prev.detach()
-
+    denoise_start_index = len(denoise_timesteps) - 1 - target
+    return latents.detach(), ref_prev.detach(), denoise_start_index
