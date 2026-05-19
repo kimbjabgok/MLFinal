@@ -131,7 +131,7 @@ def build_demo() -> gr.Blocks:
             with gr.Column():
                 source = gr.Image(type="pil", label="Source / Generated")
                 edited = gr.Image(type="pil", label="Edited result")
-                logs = gr.Code(label="Logs", language="json")
+                logs = gr.Textbox(label="Logs", lines=12)
                 saved = gr.Textbox(label="Save status")
 
         run_btn.click(
@@ -152,4 +152,3 @@ def build_demo() -> gr.Blocks:
         )
 
     return demo
-
