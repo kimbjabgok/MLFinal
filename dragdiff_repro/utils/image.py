@@ -16,7 +16,7 @@ def pil_to_tensor(image: Image.Image, device: str, dtype: torch.dtype) -> torch.
 
 
 def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
-    tensor = tensor.detach().float().cpu().clamp(-1, 1)
+    tensor = torch.nan_to_num(tensor.detach().float().cpu(), nan=0.0, posinf=1.0, neginf=-1.0).clamp(-1, 1)
     tensor = (tensor + 1.0) / 2.0
     arr = tensor[0].permute(1, 2, 0).numpy()
     arr = (arr * 255.0).round().astype("uint8")

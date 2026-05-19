@@ -97,7 +97,10 @@ def optimize_latent(
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_([optimized], max_norm=1.0)
         optimizer.step()
+        with torch.no_grad():
+            optimized.copy_(torch.nan_to_num(optimized, nan=0.0, posinf=1.0, neginf=-1.0).clamp(-10.0, 10.0))
 
         with torch.no_grad():
             feature_after = _unet_feature(bundle, optimized, timestep, text_embeds).detach()
@@ -111,4 +114,3 @@ def optimize_latent(
     optimized = optimized.detach()
     torch.cuda.empty_cache()
     return optimized, log
-
