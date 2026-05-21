@@ -44,11 +44,7 @@ def ddim_invert(
     target_timestep_index: int,
     guidance_scale: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
-    """z0에서 z_t로 가는 DDIM inversion을 근사한다.
-
-    요청한 index의 latent, 그 직전의 clean 쪽 latent,
-    그리고 z0로 다시 denoise할 때 사용할 scheduler index를 반환한다.
-    """
+ 
 
     scheduler = bundle.scheduler
     denoise_timesteps = list(scheduler.timesteps)
