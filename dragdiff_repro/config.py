@@ -26,6 +26,7 @@ class DragConfig:
     guidance_scale_real: float = 1.0
     guidance_scale_generated: float = 7.5
     use_xformers: bool = True
+    vae_tiling: bool = False
     cpu_offload: bool = False
     model_id: str = "runwayml/stable-diffusion-v1-5"
     device: str = "cuda"

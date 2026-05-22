@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 from diffusers import DDIMScheduler, StableDiffusionPipeline
@@ -13,6 +13,7 @@ class ModelBundle:
     pipe: StableDiffusionPipeline
     device: torch.device
     dtype: torch.dtype
+    prompt_cache: dict[tuple[str, str, str], torch.Tensor] = field(default_factory=dict)
 
     @property
     def vae(self):
@@ -66,7 +67,10 @@ def load_model_bundle(config: DragConfig) -> ModelBundle:
     )
 
     pipe.scheduler.set_timesteps(config.num_ddim_steps, device=device)
-    pipe.enable_vae_slicing()
+    if config.vae_tiling:
+        pipe.enable_vae_tiling()
+    else:
+        pipe.enable_vae_slicing()
 
     if config.use_xformers:
         try:
@@ -86,6 +90,11 @@ def load_model_bundle(config: DragConfig) -> ModelBundle:
 
 
 def encode_prompt(bundle: ModelBundle, prompt: str) -> torch.Tensor:
+    cache_key = (prompt, str(bundle.device), str(bundle.dtype))
+    cached = bundle.prompt_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     tokenizer = bundle.tokenizer
     tokens = tokenizer(
         [prompt],
@@ -96,7 +105,9 @@ def encode_prompt(bundle: ModelBundle, prompt: str) -> torch.Tensor:
     ).input_ids.to(bundle.device)
     with torch.no_grad():
         embeds = bundle.text_encoder(tokens)[0]
-    return embeds.to(dtype=bundle.dtype).detach()
+    embeds = embeds.to(dtype=bundle.dtype).detach()
+    bundle.prompt_cache[cache_key] = embeds
+    return embeds
 
 
 def encode_empty_prompt(bundle: ModelBundle) -> torch.Tensor:
