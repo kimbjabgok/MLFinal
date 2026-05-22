@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib
+from importlib import metadata
+
 import torch
 import torch.nn.functional as F
 from diffusers import DDPMScheduler
@@ -10,9 +13,42 @@ from dragdiff_repro.config import DragConfig
 from dragdiff_repro.models.loader import ModelBundle, encode_prompt
 
 
+def _version_tuple(value: str) -> tuple[int, ...]:
+    parts = []
+    for part in value.split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if digits:
+            parts.append(int(digits))
+    return tuple(parts)
+
+
+def disable_incompatible_torchao_dispatch() -> None:
+    try:
+        torchao_version = metadata.version("torchao")
+    except metadata.PackageNotFoundError:
+        return
+
+    if _version_tuple(torchao_version) >= (0, 16, 0):
+        return
+
+    for module_name in ("peft.import_utils", "peft.tuners.lora.torchao"):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        if hasattr(module, "is_torchao_available"):
+            module.is_torchao_available = lambda: False
+
+
 def attach_lora_to_unet(bundle: ModelBundle, config: DragConfig) -> None:
     if hasattr(bundle.unet, "peft_config") and bundle.unet.peft_config:
         return
+
+    disable_incompatible_torchao_dispatch()
 
     lora_config = LoraConfig(
         r=config.lora_rank,
