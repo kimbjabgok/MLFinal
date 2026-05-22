@@ -1,43 +1,65 @@
 # DragDiffusion 재현 프로젝트
 
-Colab 무료 T4 환경을 기준으로 만든 구현 스캐폴드입니다.
+Colab 무료 T4 GPU 환경을 기준으로 DragDiffusion을 재현하는 프로젝트입니다.
 
-대상 논문:
+참고 논문:
 
 `DragDiffusion: Harnessing Diffusion Models for Interactive Point-based Image Editing`
 
-## Colab 우선 실행
+## 실행
 
-이 프로젝트는 Colab T4에서 실행하는 것을 우선으로 합니다. 자세한 실행 순서는 [COLAB.md](COLAB.md)를 참고하세요.
+Colab 실행 순서는 [COLAB.md](COLAB.md)를 참고하세요.
 
-## 선택 사항: 로컬 Python 3.12 환경
-
-현재 로컬 `python`이 Python 3.14를 가리킬 수 있습니다. 로컬에서도 실행하려면 Python 3.12 실행 파일로 가상환경을 만드는 것을 권장합니다.
+로컬에서 실행하려면 Python 3.12 가상환경을 권장합니다.
 
 ```powershell
-# Python 3.12가 기본 경로에 설치되어 있는 경우의 예시입니다.
 & "$env:LocalAppData\Programs\Python\Python312\python.exe" -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements-colab.txt
-```
-
-로컬에 Python 3.12가 없다면 먼저 Colab에서 실행하거나 Python 3.12를 별도로 설치하세요.
-
-## Gradio 실행
-
-로컬에서는 다음 명령을 사용합니다.
-
-```powershell
 python app.py
 ```
 
-Colab에서는 다음 순서로 실행합니다.
+## T4 권장 설정
 
-```python
-!pip install -r requirements-colab.txt
-!python app.py
+현재 기본 설정은 Colab 무료 T4에서 돌아가는 것을 우선으로 맞춰져 있습니다.
+
+```text
+resolution: 384 x 384
+dtype: float16
+num_ddim_steps: 50
+target_timestep_index: 35
+lora_rank: 8
+lora_batch_size: 2
+lora_steps: 60
+lora_lr: 5e-4
+vae_tiling: False
+cpu_offload: False
 ```
+
+OOM이 발생하면 우선 `lora_batch_size`를 1로 낮추거나 해상도를 줄이세요. 고해상도 테스트에서는 `vae_tiling=True`를 사용할 수 있지만, 기본 384 해상도에서는 `vae_slicing`만 사용하는 현재 설정이 더 무난합니다.
+
+## 반영된 최적화
+
+- LoRA fine-tuning은 T4를 고려해 rank 8, steps 60, batch 2로 설정했습니다.
+- LoRA 학습은 DDPMScheduler 기반 noise sampling을 사용합니다.
+- LoRA target module에 `to_out.0`을 추가했습니다.
+- DDIM inversion은 VAE latent `sample()` 대신 `mean`을 사용해 재현성을 높였습니다.
+- DDIM inversion loop 안에서 prompt embedding을 반복 계산하지 않도록 캐싱했습니다.
+- 공식 구현에 가까운 DDIM inverse step을 별도 함수로 분리했습니다.
+- loader에서 공식 DragDiffusion에 맞춘 DDIM scheduler 설정을 사용합니다.
+- prompt embedding cache를 추가해 같은 prompt의 text encoder 반복 호출을 줄였습니다.
+- `vae_tiling` 옵션을 추가했으며 기본값은 `False`입니다.
+
+## 디버그
+
+일반 Gradio 실행에서는 reconstruction 검증이나 중간 latent 저장을 하지 않습니다. DDIM inversion 품질을 확인할 때만 별도 명령으로 실행합니다.
+
+```bash
+python scripts/check_inversion.py --image path/to/image.png --prompt "a photo of a cat"
+```
+
+결과는 기본적으로 `outputs/inversion_debug`에 저장됩니다.
 
 ## 프로젝트 구조
 
@@ -59,21 +81,8 @@ dragdiff_repro/
   utils/
     image.py
     logging.py
+scripts/
+  check_inversion.py
 app.py
 requirements-colab.txt
 ```
-
-## 구현 상태
-
-구현된 기능:
-
-- Gradio UI
-- 이미지, 마스크, 포인트 전처리
-- fp16, xformers fallback, VAE slicing을 포함한 Stable Diffusion 1.5 로더
-- 중간 latent를 저장하는 Generated Image 모드
-- LoRA 미세조정과 DDIM inversion을 사용하는 Real Image 모드 경로
-- motion supervision을 이용한 latent 최적화
-- feature map 기반 point tracking
-- self-attention K/V swap processor를 통한 reference-latent-control denoising
-
-첫 테스트는 `384` 해상도에서 Generated Image 모드와 작은 drag step 값으로 시작하는 것을 권장합니다. Real Image 모드는 LoRA 미세조정과 DDIM inversion이 추가되므로 더 무겁습니다.

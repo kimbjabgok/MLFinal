@@ -1,13 +1,13 @@
 # Colab 실행 가이드
 
-Colab 무료 T4 기준으로 실행합니다. Colab에는 CUDA용 PyTorch가 기본 설치되어 있으므로 `torch`를 강제로 재설치하지 않습니다.
+이 프로젝트는 Colab 무료 T4 GPU를 기준으로 실행합니다. Colab에는 CUDA와 PyTorch가 기본으로 준비되어 있으므로 `torch`를 강제로 재설치하지 않는 것을 권장합니다.
 
 ## 1. 런타임 설정
 
-Colab 메뉴에서:
+Colab 메뉴에서 다음을 선택합니다.
 
 ```text
-런타임 → 런타임 유형 변경 → T4 GPU
+런타임 -> 런타임 유형 변경 -> T4 GPU
 ```
 
 GPU 확인:
@@ -19,74 +19,96 @@ print(torch.cuda.get_device_name(0))
 print(torch.cuda.get_device_properties(0).total_memory / 1024**3, "GB")
 ```
 
-## 2. Drive 마운트
+## 2. 코드 준비
+
+Google Drive를 사용하는 경우:
 
 ```python
 from google.colab import drive
 drive.mount("/content/drive")
-```
-
-## 3. 코드 업로드 방식
-
-가장 단순한 방식:
-
-1. 이 프로젝트 폴더를 Google Drive에 업로드
-2. Colab에서 해당 폴더로 이동
-
-```python
 %cd /content/drive/MyDrive/DragDiffusion
 ```
 
-GitHub에 올린 뒤 clone하는 방식도 가능:
+GitHub에서 clone하는 경우:
 
 ```bash
-git clone <your-repo-url>
-%cd <repo-dir>
+git clone https://github.com/kimbjabgok/MLFinal.git
+cd MLFinal
 ```
 
-## 4. 패키지 설치
+## 3. 패키지 설치
 
 ```bash
 pip install -r requirements-colab.txt
 ```
 
-설치 후 런타임 재시작이 필요하다는 메시지가 나오면 재시작 후 다시 폴더로 이동합니다.
+설치 후 런타임 재시작 안내가 나오면 재시작한 뒤 프로젝트 폴더로 다시 이동하세요.
 
-## 5. Gradio 실행
+## 4. Gradio 실행
 
 ```bash
 python app.py
 ```
 
-출력되는 public Gradio URL을 열어서 사용합니다.
+출력되는 public Gradio URL을 열어 사용합니다.
 
-## 6. 첫 테스트 권장값
+## 5. 현재 T4 권장값
 
-먼저 Generated Image 모드로 테스트합니다.
-
-| 항목 | 값 |
-|---|---|
-| mode | Generated Image |
-| resolution | 384 |
-| LoRA steps | 0 |
-| Drag steps | 10 |
-| prompt | a photo of a cat |
-| handle points | 180,220 |
-| target points | 250,220 |
-
-Generated Image 모드가 정상 동작한 뒤 Real Image 모드로 넘어갑니다.
-
-## 7. Real Image 모드 권장값
+기본 설정은 `dragdiff_repro/config.py`에 있습니다.
 
 | 항목 | 값 |
 |---|---|
-| resolution | 384 |
-| LoRA steps | 20 또는 50 |
-| Drag steps | 30 또는 50 |
-| mask | 흰색 영역이 편집 가능인 PNG |
+| resolution | 384 x 384 |
+| dtype | float16 |
+| num_ddim_steps | 50 |
+| target_timestep_index | 35 |
+| LoRA rank | 8 |
+| LoRA batch size | 2 |
+| LoRA steps | 60 |
+| LoRA lr | 5e-4 |
+| guidance_scale_real | 1.0 |
+| guidance_scale_generated | 7.5 |
+| vae_tiling | False |
+| cpu_offload | False |
 
-OOM이 나면 LoRA steps, Drag steps를 낮추고, 런타임을 재시작한 뒤 다시 실행합니다.
+## 6. 테스트 순서
 
-참고: 이 프로젝트에서는 CPU offload를 사용하지 않습니다. latent 최적화 단계에서
-UNet을 거쳐 역전파가 필요하기 때문입니다. offload를 켜면 UNet 가중치는 CPU에 있고
-최적화 중인 latent는 CUDA에 남을 수 있어 `loss.backward()`가 실패할 수 있습니다.
+먼저 Generated Image 모드로 확인하는 것을 권장합니다.
+
+```text
+mode: Generated Image
+resolution: 384
+drag_steps: 10 또는 30
+prompt: a photo of a cat
+```
+
+Generated Image 모드가 정상 동작하면 Real Image 모드를 테스트합니다. Real Image 모드는 LoRA fine-tuning과 DDIM inversion이 추가되어 더 오래 걸립니다.
+
+## 7. OOM 대응
+
+T4에서 메모리 부족이 나면 다음 순서로 낮춰보세요.
+
+```text
+1. lora_batch_size: 2 -> 1
+2. drag_steps 감소
+3. resolution 감소
+4. 고해상도 테스트에서만 vae_tiling=True 사용
+```
+
+`cpu_offload=True`는 VRAM을 줄일 수 있지만 속도가 크게 느려질 수 있습니다. 또한 latent optimization 중 GPU/CPU 이동 문제가 생길 수 있으므로 기본값은 `False`로 유지합니다.
+
+## 8. DDIM inversion 디버그
+
+일반 Gradio 실행에서는 reconstruction 검증을 하지 않습니다. 필요할 때만 별도 명령으로 실행합니다.
+
+```bash
+python scripts/check_inversion.py --image path/to/image.png --prompt "a photo of a cat"
+```
+
+LoRA 없이 inversion만 빠르게 확인하려면:
+
+```bash
+python scripts/check_inversion.py --image path/to/image.png --prompt "a photo of a cat" --skip-lora
+```
+
+결과는 `outputs/inversion_debug/source.png`, `outputs/inversion_debug/reconstruction.png`로 저장됩니다.
