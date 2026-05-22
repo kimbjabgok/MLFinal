@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
+from diffusers import DDPMScheduler
 from peft import LoraConfig, get_peft_model
 from tqdm.auto import tqdm
 
@@ -17,7 +18,7 @@ def attach_lora_to_unet(bundle: ModelBundle, config: DragConfig) -> None:
         r=config.lora_rank,
         lora_alpha=config.lora_rank,
         init_lora_weights="gaussian",
-        target_modules=["to_q", "to_k", "to_v"],
+        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
     )
     bundle.pipe.unet = get_peft_model(bundle.unet, lora_config)
     bundle.pipe.unet.train()
@@ -44,12 +45,20 @@ def finetune_lora(
         lr=config.lora_lr,
     )
     text_embeds = encode_prompt(bundle, prompt)
-    timesteps = bundle.scheduler.timesteps
+    batch_size = max(1, int(config.lora_batch_size))
+    train_scheduler = DDPMScheduler.from_config(bundle.scheduler.config)
+    image_latent_batch = image_latent.repeat(batch_size, 1, 1, 1)
+    text_embeds = text_embeds.repeat(batch_size, 1, 1)
 
     for _ in tqdm(range(config.lora_steps), desc="LoRA fine-tuning"):
-        timestep = timesteps[torch.randint(0, len(timesteps), (1,), device=bundle.device)]
-        noise = torch.randn_like(image_latent)
-        noisy = bundle.scheduler.add_noise(image_latent, noise, timestep)
+        timestep = torch.randint(
+            0,
+            train_scheduler.config.num_train_timesteps,
+            (batch_size,),
+            device=bundle.device,
+        ).long()
+        noise = torch.randn_like(image_latent_batch)
+        noisy = train_scheduler.add_noise(image_latent_batch, noise, timestep)
 
         pred = unet(noisy, timestep, encoder_hidden_states=text_embeds).sample
         loss = F.mse_loss(pred.float(), noise.float())

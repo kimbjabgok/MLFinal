@@ -14,8 +14,8 @@ class DragConfig:
     num_ddim_steps: int = 50
     target_timestep_index: int = 35
     lora_rank: int = 8
-    lora_batch_size: int = 1
-    lora_steps: int = 50
+    lora_batch_size: int = 2
+    lora_steps: int = 60
     lora_lr: float = 5e-4
     drag_steps: int = 50
     latent_lr: float = 0.01
