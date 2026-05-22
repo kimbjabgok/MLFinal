@@ -47,7 +47,16 @@ def load_model_bundle(config: DragConfig) -> ModelBundle:
     dtype = resolve_dtype(config.dtype)
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
 
-    scheduler = DDIMScheduler.from_pretrained(config.model_id, subfolder="scheduler")
+    scheduler = DDIMScheduler.from_pretrained(
+        config.model_id,
+        subfolder="scheduler",
+        beta_start=0.00085,
+        beta_end=0.012,
+        beta_schedule="scaled_linear",
+        clip_sample=False,
+        set_alpha_to_one=False,
+        steps_offset=1,
+    )
     pipe = StableDiffusionPipeline.from_pretrained(
         config.model_id,
         scheduler=scheduler,
