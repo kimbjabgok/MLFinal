@@ -97,6 +97,14 @@ def denoise_from_timestep(
     start_index: int,
     guidance_scale: float,
 ) -> Image.Image:
+    current = torch.nan_to_num(latents.detach(), nan=0.0, posinf=1.0, neginf=-1.0)
+    for timestep in bundle.scheduler.timesteps[start_index:]:
+        noise_pred = predict_noise(bundle, current, timestep, prompt, guidance_scale)
+        current = bundle.scheduler.step(noise_pred, timestep, current).prev_sample
+        current = torch.nan_to_num(current, nan=0.0, posinf=1.0, neginf=-1.0)
+
+    image_tensor = latent_to_image(bundle, current)
+    return tensor_to_pil(image_tensor)
     current = torch.nan_to_num(latents.detach(), nan=0.0, posinf=1.0, neginf=-1.0)  #편집된 latent를 current로 복사.
     reference_current = torch.nan_to_num(reference_latents.detach(), nan=0.0, posinf=1.0, neginf=-1.0)
     timesteps = bundle.scheduler.timesteps[start_index:] # 편집된 중간 latent에서 최종 이미지까지 denoise할 남은 단계들.
