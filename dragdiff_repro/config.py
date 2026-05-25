@@ -18,7 +18,7 @@ class DragConfig:
     lora_steps: int = 40
     lora_lr: float = 5e-4
     drag_steps: int = 30
-    latent_lr: float = 0.05
+    latent_lr: float = 0.03
     lambda_mask: float = 0.1
     r1: int = 4
     r2: int = 3

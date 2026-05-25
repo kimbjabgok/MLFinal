@@ -102,14 +102,15 @@ def optimize_latent(
                     current_points = nearest_neighbor_track(feature.detach(), ref_vectors, current_points, config.r2)
 
             motion_loss = _motion_supervision_loss(feature, current_points, target_points, config.r1)
+            target_loss = torch.abs(sample_feature(feature, target_points) - ref_vectors).mean()
 
             preserve_loss = torch.abs((optimized - original_latent_zt) * (1.0 - mask)).mean()
-            loss = motion_loss + config.lambda_mask * preserve_loss
+            loss = motion_loss + 0.2 * target_loss + config.lambda_mask * preserve_loss
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_([optimized], max_norm=5.0)
+        torch.nn.utils.clip_grad_norm_([optimized], max_norm=3.0)
         scaler.step(optimizer)
         scaler.update()
         with torch.no_grad():
