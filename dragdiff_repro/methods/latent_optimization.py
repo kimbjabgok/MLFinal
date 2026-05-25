@@ -27,6 +27,7 @@ def _unet_feature(
     timestep: torch.Tensor,
     text_embeds: torch.Tensor,
 ) -> torch.Tensor:
+    latents = latents.to(device=bundle.device, dtype=bundle.dtype)
     with capture_up_block_feature(bundle.unet, block_index=2) as capture:
         _ = bundle.unet(latents, timestep, encoder_hidden_states=text_embeds).sample
     if capture.feature is None:
