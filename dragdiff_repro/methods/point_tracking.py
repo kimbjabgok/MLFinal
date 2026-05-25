@@ -28,19 +28,19 @@ def nearest_neighbor_track(
     next_points: list[tuple[int, int]] = []
 
     for index, (x, y) in enumerate(current_points):
-        best_point = (x, y)
-        best_dist = None
         ref = reference_vectors[index]
+        x_min = max(0, x - radius)
+        x_max = min(w, x + radius + 1)
+        y_min = max(0, y - radius)
+        y_max = min(h, y + radius + 1)
 
-        for yy in range(max(0, y - radius), min(h, y + radius + 1)):
-            for xx in range(max(0, x - radius), min(w, x + radius + 1)):
-                vec = feature[0, :, yy, xx]
-                dist = torch.abs(vec - ref).mean()
-                if best_dist is None or dist < best_dist:
-                    best_dist = dist
-                    best_point = (xx, yy)
+        patch = feature[0, :, y_min:y_max, x_min:x_max]
+        distances = torch.abs(patch - ref[:, None, None]).mean(dim=0)
+        best_index = int(torch.argmin(distances).item())
+        patch_width = x_max - x_min
+        best_y, best_x = divmod(best_index, patch_width)
 
-        next_points.append(best_point)
+        next_points.append((x_min + best_x, y_min + best_y))
 
     return next_points
 
