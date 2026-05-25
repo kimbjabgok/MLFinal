@@ -80,6 +80,8 @@ def optimize_latent(
 
     optimized = latent_zt.detach().clone().requires_grad_(True)
     optimizer = torch.optim.Adam([optimized], lr=config.latent_lr)
+    use_amp = bundle.device.type == "cuda" and bundle.dtype == torch.float16
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     log = RunLog()
 
     with torch.no_grad():
@@ -88,23 +90,27 @@ def optimize_latent(
 
     current_points = list(handle_points)
 
-    for _ in tqdm(range(config.drag_steps), desc="Latent optimization"):
-        feature = _unet_feature(bundle, optimized, timestep, text_embeds)
-        motion_loss = _motion_supervision_loss(feature, current_points, target_points, config.r1)
+    for step_idx in tqdm(range(config.drag_steps), desc="Latent optimization"):
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+            feature = _unet_feature(bundle, optimized, timestep, text_embeds)
 
-        preserve_loss = torch.abs((optimized - original_latent_zt) * (1.0 - mask)).mean()
-        loss = motion_loss + config.lambda_mask * preserve_loss
+            if step_idx != 0:
+                with torch.no_grad():
+                    current_points = nearest_neighbor_track(feature.detach(), ref_vectors, current_points, config.r2)
+
+            motion_loss = _motion_supervision_loss(feature, current_points, target_points, config.r1)
+
+            preserve_loss = torch.abs((optimized - original_latent_zt) * (1.0 - mask)).mean()
+            loss = motion_loss + config.lambda_mask * preserve_loss
 
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_([optimized], max_norm=1.0)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         with torch.no_grad():
             optimized.copy_(torch.nan_to_num(optimized, nan=0.0, posinf=1.0, neginf=-1.0).clamp(-10.0, 10.0))
-
-        with torch.no_grad():
-            feature_after = _unet_feature(bundle, optimized, timestep, text_embeds).detach()
-            current_points = nearest_neighbor_track(feature_after, ref_vectors, current_points, config.r2)
             log.loss_history.append(float(loss.detach().cpu()))
             log.point_history.append(list(current_points))
 
