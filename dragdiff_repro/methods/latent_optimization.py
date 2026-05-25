@@ -99,7 +99,13 @@ def optimize_latent(
 
             if step_idx != 0:
                 with torch.no_grad():
-                    current_points = nearest_neighbor_track(feature.detach(), ref_vectors, current_points, config.r2)
+                    current_points = nearest_neighbor_track(
+                        feature.detach(),
+                        ref_vectors,
+                        current_points,
+                        config.r2,
+                        target_points=target_points,
+                    )
 
             motion_loss = _motion_supervision_loss(feature, current_points, target_points, config.r1)
             target_loss = torch.abs(sample_feature(feature, target_points) - ref_vectors).mean()
