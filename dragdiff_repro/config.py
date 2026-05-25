@@ -18,11 +18,12 @@ class DragConfig:
     lora_steps: int = 40
     lora_lr: float = 5e-4
     drag_steps: int = 30
-    latent_lr: float = 0.03
+    latent_lr: float = 0.01
     lambda_mask: float = 0.1
-    r1: int = 4
+    r1: int = 1
     r2: int = 3
-    point_stop_threshold: float = 0.5
+    point_stop_threshold: float = 2.0
+    feature_supervision_size: int = 64
     guidance_scale_real: float = 1.0
     guidance_scale_generated: float = 7.5
     use_xformers: bool = True

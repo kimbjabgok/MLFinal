@@ -136,17 +136,26 @@ def _clear_points(image):
     return image, [], [], None, "Click once for a handle point, then click once for its target point."
 
 
-def _pixel_to_latent_points(
+def _pixel_to_feature_points(
     points: list[tuple[int, int]],
     source_size: tuple[int, int],
     config: DragConfig,
 ) -> list[tuple[int, int]]:
+    """Convert UI pixel points to feature-map (x, y) coordinates.
+
+    The optimizer keeps public points as (x, y). Feature tensors are still
+    indexed internally as feature[:, :, y, x].
+    """
+
     src_w, src_h = source_size
+    feature_size = config.feature_supervision_size
     points_out = []
     for x, y in points:
-        scaled_x = x * config.width / max(src_w, 1)
-        scaled_y = y * config.height / max(src_h, 1)
-        points_out.append((int(round(scaled_x / 8)), int(round(scaled_y / 8))))
+        scaled_x = x * feature_size / max(src_w, 1)
+        scaled_y = y * feature_size / max(src_h, 1)
+        fx = min(max(int(round(scaled_x)), 0), feature_size - 1)
+        fy = min(max(int(round(scaled_y)), 0), feature_size - 1)
+        points_out.append((fx, fy))
     return points_out
 
 
@@ -194,8 +203,8 @@ def _run(
         source_pil = pil_to_rgb(image, (config.width, config.height))
         image_tensor = pil_to_tensor(source_pil, str(bundle.device), bundle.dtype)
 
-    handles = _pixel_to_latent_points(pixel_handles, source_size, config)
-    targets = _pixel_to_latent_points(pixel_targets, source_size, config)
+    handles = _pixel_to_feature_points(pixel_handles, source_size, config)
+    targets = _pixel_to_feature_points(pixel_targets, source_size, config)
     mask_tensor = prepare_mask(None, latent_hw, str(bundle.device))
 
     request = EditRequest(

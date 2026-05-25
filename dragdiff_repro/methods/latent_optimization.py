@@ -26,6 +26,7 @@ def _unet_feature(
     latents: torch.Tensor,
     timestep: torch.Tensor,
     text_embeds: torch.Tensor,
+    feature_size: int,
 ) -> torch.Tensor:
     latents = latents.to(device=bundle.device, dtype=bundle.dtype)
     with capture_up_block_feature(bundle.unet, block_index=2) as capture:
@@ -33,9 +34,35 @@ def _unet_feature(
     if capture.feature is None:
         raise RuntimeError("UNet feature hook did not capture an activation.")
     feature = capture.feature
-    if feature.shape[-2:] != latents.shape[-2:]:
-        feature = F.interpolate(feature, size=latents.shape[-2:], mode="bilinear", align_corners=False)
+    target_size = (feature_size, feature_size)
+    if feature.shape[-2:] != target_size:
+        feature = F.interpolate(feature, size=target_size, mode="bilinear", align_corners=False)
     return feature
+
+
+def _interpolate_feature_patch(
+    feature: torch.Tensor,
+    y_min: int,
+    y_max: int,
+    x_min: int,
+    x_max: int,
+    step_x: float,
+    step_y: float,
+) -> torch.Tensor:
+    """Sample a feature patch shifted by (step_x, step_y).
+
+    Public point convention is (x, y). PyTorch grid_sample expects normalized
+    coordinates as (x, y), while feature indexing is feature[:, :, y, x].
+    """
+
+    _, _, h, w = feature.shape
+    ys = torch.arange(y_min, y_max, device=feature.device, dtype=torch.float32) + step_y
+    xs = torch.arange(x_min, x_max, device=feature.device, dtype=torch.float32) + step_x
+    grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
+    norm_x = (2.0 * grid_x / max(w - 1, 1)) - 1.0
+    norm_y = (2.0 * grid_y / max(h - 1, 1)) - 1.0
+    grid = torch.stack((norm_x, norm_y), dim=-1).unsqueeze(0)
+    return F.grid_sample(feature, grid, mode="bilinear", padding_mode="border", align_corners=True)
 
 
 def _motion_supervision_loss(
@@ -44,6 +71,12 @@ def _motion_supervision_loss(
     target_points: list[tuple[int, int]],
     radius: int,
 ) -> torch.Tensor:
+    """Official-style patch motion supervision.
+
+    handle_points and target_points use (x, y). We convert to tensor indexing
+    as (row=y, col=x) whenever slicing feature[:, :, row, col].
+    """
+
     _, _, h, w = feature.shape
     loss = feature.new_tensor(0.0)
 
@@ -55,12 +88,19 @@ def _motion_supervision_loss(
         norm = max((dx * dx + dy * dy) ** 0.5, 1e-6)
         step_x = dx / norm
         step_y = dy / norm
+        if norm < 2.0:
+            continue
 
-        for yy in range(max(0, hy - radius), min(h, hy + radius + 1)):
-            for xx in range(max(0, hx - radius), min(w, hx + radius + 1)):
-                src = sample_feature(feature, [(xx, yy)])[0].detach()
-                dst = sample_feature(feature, [(xx + step_x, yy + step_y)])[0]
-                loss = loss + torch.abs(dst - src).mean()
+        x_min = max(0, int(hx) - radius)
+        x_max = min(w, int(hx) + radius + 1)
+        y_min = max(0, int(hy) - radius)
+        y_max = min(h, int(hy) + radius + 1)
+        if x_min >= x_max or y_min >= y_max:
+            continue
+
+        src_patch = feature[:, :, y_min:y_max, x_min:x_max].detach()
+        dst_patch = _interpolate_feature_patch(feature, y_min, y_max, x_min, x_max, step_x, step_y)
+        loss = loss + ((2 * radius + 1) ** 2) * F.l1_loss(src_patch, dst_patch)
 
     return loss
 
@@ -78,6 +118,7 @@ def optimize_latent(
     _freeze_unet(bundle.unet)
     timestep = bundle.scheduler.timesteps[config.target_timestep_index].to(bundle.device)
     text_embeds = encode_prompt(bundle, prompt)
+    feature_size = config.feature_supervision_size
 
     optimized = latent_zt.detach().clone().float().requires_grad_(True)
     original_latent_zt = original_latent_zt.detach().float()
@@ -88,14 +129,14 @@ def optimize_latent(
     log = RunLog()
 
     with torch.no_grad():
-        ref_feature = _unet_feature(bundle, original_latent_zt, timestep, text_embeds).detach()
+        ref_feature = _unet_feature(bundle, original_latent_zt, timestep, text_embeds, feature_size).detach()
         ref_vectors = sample_feature(ref_feature, handle_points).detach()
 
     current_points = list(handle_points)
 
     for step_idx in tqdm(range(config.drag_steps), desc="Latent optimization"):
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
-            feature = _unet_feature(bundle, optimized, timestep, text_embeds)
+            feature = _unet_feature(bundle, optimized, timestep, text_embeds, feature_size)
 
             if step_idx != 0:
                 with torch.no_grad():
@@ -104,19 +145,16 @@ def optimize_latent(
                         ref_vectors,
                         current_points,
                         config.r2,
-                        target_points=target_points,
                     )
 
             motion_loss = _motion_supervision_loss(feature, current_points, target_points, config.r1)
-            target_loss = torch.abs(sample_feature(feature, target_points) - ref_vectors).mean()
-
             preserve_loss = torch.abs((optimized - original_latent_zt) * (1.0 - mask)).mean()
-            loss = motion_loss + 0.2 * target_loss + config.lambda_mask * preserve_loss
+            loss = motion_loss + config.lambda_mask * preserve_loss
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_([optimized], max_norm=3.0)
+        torch.nn.utils.clip_grad_norm_([optimized], max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
         with torch.no_grad():

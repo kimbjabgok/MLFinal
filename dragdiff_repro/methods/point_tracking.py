@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 
 def sample_feature(feature: torch.Tensor, points: list[tuple[int, int]]) -> torch.Tensor:
-    """Bilinear sample feature vectors at integer latent-space points."""
+    """Bilinear sample feature vectors at (x, y) feature-map points."""
 
     _, _, h, w = feature.shape
     coords = []
@@ -23,9 +23,13 @@ def nearest_neighbor_track(
     reference_vectors: torch.Tensor,
     current_points: list[tuple[int, int]],
     radius: int,
-    target_points: list[tuple[int, int]] | None = None,
-    target_weight: float = 0.05,
 ) -> list[tuple[int, int]]:
+    """Track each handle by pure nearest-neighbor feature matching.
+
+    Public point convention is (x, y). Internally feature tensors are indexed
+    as feature[:, :, row, col] == feature[:, :, y, x], matching PyTorch.
+    """
+
     _, _, h, w = feature.shape
     next_points: list[tuple[int, int]] = []
 
@@ -37,13 +41,7 @@ def nearest_neighbor_track(
         y_max = min(h, y + radius + 1)
 
         patch = feature[0, :, y_min:y_max, x_min:x_max]
-        distances = torch.abs(patch - ref[:, None, None]).mean(dim=0)
-        if target_points is not None:
-            target_x, target_y = target_points[index]
-            ys = torch.arange(y_min, y_max, device=feature.device, dtype=distances.dtype)[:, None]
-            xs = torch.arange(x_min, x_max, device=feature.device, dtype=distances.dtype)[None, :]
-            target_distance = torch.sqrt((xs - target_x) ** 2 + (ys - target_y) ** 2)
-            distances = distances + target_weight * target_distance
+        distances = torch.abs(patch - ref[:, None, None]).sum(dim=0)
         best_index = int(torch.argmin(distances).item())
         patch_width = x_max - x_min
         best_y, best_x = divmod(best_index, patch_width)
