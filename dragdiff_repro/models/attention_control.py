@@ -104,7 +104,7 @@ def reference_latent_control(unet) -> Iterator[ReferenceAttentionController]:
     processors = {}
 
     for name in original_processors:
-        enabled = "up_blocks" in name and "attn1" in name
+        enabled = "up_blocks.2" in name and "attn1" in name
         processors[name] = ReferenceKVProcessor(name=name, controller=controller, enabled=enabled)
 
     unet.set_attn_processor(processors)
