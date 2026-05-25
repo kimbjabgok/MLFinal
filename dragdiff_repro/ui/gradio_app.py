@@ -49,8 +49,8 @@ def _save_result(result: dict, config: DragConfig) -> str:
 
 def _draw_point(draw: ImageDraw.ImageDraw, point: tuple[int, int], color: str) -> None:
     x, y = point
-    radius = 5
-    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color, outline="white", width=2)
+    radius = 10
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color, outline="white", width=3)
 
 
 def _draw_overlay(
@@ -68,8 +68,8 @@ def _draw_overlay(
     for handle, target in zip(handles, targets):
         _draw_point(draw, handle, "red")
         _draw_point(draw, target, "blue")
-        draw.line((handle[0], handle[1], target[0], target[1]), fill="white", width=4)
-        draw.line((handle[0], handle[1], target[0], target[1]), fill="#4f7cff", width=2)
+        draw.line((handle[0], handle[1], target[0], target[1]), fill="white", width=6)
+        draw.line((handle[0], handle[1], target[0], target[1]), fill="#4f7cff", width=3)
 
     if pending is not None:
         _draw_point(draw, pending, "red")
