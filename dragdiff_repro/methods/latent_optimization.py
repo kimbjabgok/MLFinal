@@ -109,7 +109,7 @@ def optimize_latent(
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_([optimized], max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_([optimized], max_norm=5.0)
         scaler.step(optimizer)
         scaler.update()
         with torch.no_grad():

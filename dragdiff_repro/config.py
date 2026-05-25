@@ -15,10 +15,10 @@ class DragConfig:
     target_timestep_index: int = 35
     lora_rank: int = 8
     lora_batch_size: int = 2
-    lora_steps: int = 60
+    lora_steps: int = 40
     lora_lr: float = 5e-4
-    drag_steps: int = 50
-    latent_lr: float = 0.01
+    drag_steps: int = 30
+    latent_lr: float = 0.05
     lambda_mask: float = 0.1
     r1: int = 4
     r2: int = 3
