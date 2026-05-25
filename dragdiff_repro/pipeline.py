@@ -116,6 +116,7 @@ def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
         handle_points=request.handle_points,
         target_points=request.target_points,
         config=config,
+        timestep_index=denoise_start_index,
     )
 
     edited_image = denoise_from_timestep(

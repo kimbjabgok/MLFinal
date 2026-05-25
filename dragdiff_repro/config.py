@@ -23,7 +23,7 @@ class DragConfig:
     r1: int = 1
     r2: int = 3
     point_stop_threshold: float = 2.0
-    feature_supervision_size: int = 64
+    feature_supervision_size: int = 128
     guidance_scale_real: float = 1.0
     guidance_scale_generated: float = 7.5
     use_xformers: bool = True

@@ -114,9 +114,13 @@ def optimize_latent(
     handle_points: list[tuple[int, int]],
     target_points: list[tuple[int, int]],
     config: DragConfig,
+    timestep_index: int | None = None,
 ) -> tuple[torch.Tensor, RunLog]:
     _freeze_unet(bundle.unet)
-    timestep = bundle.scheduler.timesteps[config.target_timestep_index].to(bundle.device)
+    # Generated mode optimizes at config.target_timestep_index. Real mode must
+    # optimize at the DDIM inversion latent's actual denoise_start_index.
+    active_timestep_index = config.target_timestep_index if timestep_index is None else timestep_index
+    timestep = bundle.scheduler.timesteps[active_timestep_index].to(bundle.device)
     text_embeds = encode_prompt(bundle, prompt)
     feature_size = config.feature_supervision_size
 
