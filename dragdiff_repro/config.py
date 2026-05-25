@@ -22,7 +22,7 @@ class DragConfig:
     lambda_mask: float = 0.1
     r1: int = 4
     r2: int = 3
-    point_stop_threshold: float = 1.5
+    point_stop_threshold: float = 0.5
     guidance_scale_real: float = 1.0
     guidance_scale_generated: float = 7.5
     use_xformers: bool = True
