@@ -78,10 +78,12 @@ def optimize_latent(
     timestep = bundle.scheduler.timesteps[config.target_timestep_index].to(bundle.device)
     text_embeds = encode_prompt(bundle, prompt)
 
-    optimized = latent_zt.detach().clone().requires_grad_(True)
+    optimized = latent_zt.detach().clone().float().requires_grad_(True)
+    original_latent_zt = original_latent_zt.detach().float()
+    mask = mask.to(device=optimized.device, dtype=optimized.dtype)
     optimizer = torch.optim.Adam([optimized], lr=config.latent_lr)
     use_amp = bundle.device.type == "cuda" and bundle.dtype == torch.float16
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     log = RunLog()
 
     with torch.no_grad():
@@ -117,6 +119,6 @@ def optimize_latent(
         if all_points_reached(current_points, target_points, config.point_stop_threshold):
             break
 
-    optimized = optimized.detach()
+    optimized = optimized.detach().to(dtype=latent_zt.dtype)
     torch.cuda.empty_cache()
     return optimized, log
