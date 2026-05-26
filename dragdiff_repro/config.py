@@ -25,6 +25,7 @@ class DragConfig:
     point_stop_threshold: float = 2.0
     feature_supervision_size: int = 128
     unet_feature_block_index: int = 3
+    auto_mask_radius: int = 56
     guidance_scale_real: float = 1.0
     guidance_scale_generated: float = 7.5
     use_xformers: bool = True

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 
 def pil_to_rgb(image: Image.Image, size: tuple[int, int]) -> Image.Image:
@@ -30,6 +30,50 @@ def prepare_mask(mask_image: Image.Image | None, latent_hw: tuple[int, int], dev
 
     mask = mask_image.convert("L").resize((w, h), Image.Resampling.NEAREST)
     arr = (np.asarray(mask) > 127).astype("float32")
+    return torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).to(device=device)
+
+
+def prepare_drag_mask(
+    handle_points: list[tuple[int, int]],
+    target_points: list[tuple[int, int]],
+    source_size: tuple[int, int],
+    image_size: tuple[int, int],
+    latent_hw: tuple[int, int],
+    radius_px: int,
+    device: str,
+) -> torch.Tensor:
+    """Create a soft editable mask around drag paths.
+
+    UI points are pixel (x, y) coordinates in source_size. The returned mask is
+    latent-space, where 1 means editable and 0 means preserved.
+    """
+
+    src_w, src_h = source_size
+    img_w, img_h = image_size
+    latent_h, latent_w = latent_hw
+    mask = Image.new("L", (img_w, img_h), 0)
+    draw = ImageDraw.Draw(mask)
+
+    def scale_point(point: tuple[int, int]) -> tuple[int, int]:
+        x, y = point
+        return (
+            int(round(x * img_w / max(src_w, 1))),
+            int(round(y * img_h / max(src_h, 1))),
+        )
+
+    radius = max(1, int(radius_px))
+    line_width = max(1, radius * 2)
+    for handle, target in zip(handle_points, target_points):
+        hx, hy = scale_point(handle)
+        tx, ty = scale_point(target)
+        draw.line((hx, hy, tx, ty), fill=255, width=line_width)
+        draw.ellipse((hx - radius, hy - radius, hx + radius, hy + radius), fill=255)
+        draw.ellipse((tx - radius, ty - radius, tx + radius, ty + radius), fill=255)
+
+    blur_radius = max(1, radius // 4)
+    mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+    mask = mask.resize((latent_w, latent_h), Image.Resampling.BILINEAR)
+    arr = np.asarray(mask).astype("float32") / 255.0
     return torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).to(device=device)
 
 

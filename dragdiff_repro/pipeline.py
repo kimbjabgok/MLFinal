@@ -149,6 +149,7 @@ def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
             "denoise_start_index": denoise_start_index,
             "feature_supervision_size": config.feature_supervision_size,
             "unet_feature_block_index": config.unet_feature_block_index,
+            "auto_mask_radius": config.auto_mask_radius,
             "handle_points_feature": request.handle_points,
             "target_points_feature": request.target_points,
         },

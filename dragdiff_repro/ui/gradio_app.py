@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 from dragdiff_repro.config import DragConfig, EditRequest
 from dragdiff_repro.models.loader import ModelBundle, load_model_bundle
 from dragdiff_repro.pipeline import run_dragdiffusion
-from dragdiff_repro.utils.image import pil_to_rgb, pil_to_tensor, prepare_mask
+from dragdiff_repro.utils.image import pil_to_rgb, pil_to_tensor, prepare_drag_mask
 
 
 _MODEL_BUNDLE: ModelBundle | None = None
@@ -211,7 +211,15 @@ def _run(
 
     handles = _pixel_to_feature_points(pixel_handles, source_size, config)
     targets = _pixel_to_feature_points(pixel_targets, source_size, config)
-    mask_tensor = prepare_mask(None, latent_hw, str(bundle.device))
+    mask_tensor = prepare_drag_mask(
+        pixel_handles,
+        pixel_targets,
+        source_size=source_size,
+        image_size=(config.width, config.height),
+        latent_hw=latent_hw,
+        radius_px=config.auto_mask_radius,
+        device=str(bundle.device),
+    )
 
     request = EditRequest(
         mode="real" if mode == "real" else "generated",
