@@ -9,13 +9,11 @@ from PIL import Image, ImageDraw
 
 from dragdiff_repro.config import DragConfig, EditRequest
 from dragdiff_repro.models.loader import ModelBundle, load_model_bundle
-from dragdiff_repro.pipeline import run_dragdiffusion
+from dragdiff_repro.pipeline import generate_image_and_latent, run_dragdiffusion
 from dragdiff_repro.utils.image import pil_to_rgb, pil_to_tensor, prepare_drag_mask
 
 
 _MODEL_BUNDLE: ModelBundle | None = None
-_DEFAULT_HANDLES = [(180, 220)]
-_DEFAULT_TARGETS = [(250, 220)]
 
 
 def _get_model(config: DragConfig) -> ModelBundle:
@@ -98,15 +96,50 @@ def _format_points(
     return "\n".join(lines)
 
 
+def _mode_changed(mode: str):
+    is_generated = mode == "generated"
+    message = "Generate an image first, then click handle and target points."
+    if not is_generated:
+        message = "Upload an image, then click handle and target points."
+    return (
+        gr.update(visible=not is_generated),
+        gr.update(visible=is_generated),
+        None,
+        None,
+        [],
+        [],
+        None,
+        None,
+        message,
+    )
+
+
 def _sync_image(image):
     if image is None:
-        return None, [], [], None, "Upload an image, then click handle and target points."
-    return image, [], [], None, "Click once for a handle point, then click once for its target point."
+        return None, None, [], [], None, None, "Upload an image, then click handle and target points."
+    return image, image, [], [], None, ("real",), "Click once for a handle point, then click once for its target point."
 
 
-def _select_point(image, handles, targets, pending, evt: gr.SelectData):
-    if image is None:
-        raise gr.Error("Upload an image first.")
+def _generate_source(prompt: str, height: int, seed: int):
+    if not prompt.strip():
+        raise gr.Error("Please enter a prompt.")
+
+    config = DragConfig(
+        height=int(height),
+        width=int(height),
+        seed=int(seed),
+        cpu_offload=False,
+    )
+    bundle = _get_model(config)
+    image, _ = generate_image_and_latent(bundle, prompt, config)
+    torch.cuda.empty_cache()
+    source_meta = ("generated", prompt, int(height), int(seed))
+    return image, image, image, [], [], None, source_meta, "Click once for a handle point, then click once for its target point."
+
+
+def _select_point(source_image, handles, targets, pending, evt: gr.SelectData):
+    if source_image is None:
+        raise gr.Error("Prepare a source image first.")
 
     x, y = evt.index
     point = (int(x), int(y))
@@ -120,11 +153,11 @@ def _select_point(image, handles, targets, pending, evt: gr.SelectData):
         targets.append(point)
         pending = None
 
-    overlay = _draw_overlay(image, handles, targets, pending)
+    overlay = _draw_overlay(source_image, handles, targets, pending)
     return overlay, handles, targets, pending, _format_points(handles, targets, pending)
 
 
-def _undo_point(image, handles, targets, pending):
+def _undo_point(source_image, handles, targets, pending):
     handles = list(handles or [])
     targets = list(targets or [])
 
@@ -134,12 +167,12 @@ def _undo_point(image, handles, targets, pending):
         handles.pop()
         targets.pop()
 
-    overlay = _draw_overlay(image, handles, targets, pending)
+    overlay = _draw_overlay(source_image, handles, targets, pending)
     return overlay, handles, targets, pending, _format_points(handles, targets, pending)
 
 
-def _clear_points(image):
-    return image, [], [], None, "Click once for a handle point, then click once for its target point."
+def _clear_points(source_image):
+    return source_image, [], [], None, "Click once for a handle point, then click once for its target point."
 
 
 def _pixel_to_feature_points(
@@ -167,7 +200,8 @@ def _pixel_to_feature_points(
 
 def _run(
     mode: str,
-    image,
+    source_image,
+    source_meta,
     prompt: str,
     handles_state,
     targets_state,
@@ -190,12 +224,15 @@ def _run(
     bundle = _get_model(config)
     latent_hw = (config.height // 8, config.width // 8)
 
+    if source_image is None:
+        if mode == "generated":
+            raise gr.Error("Generate an image first.")
+        raise gr.Error("Upload an image first.")
+    if mode == "generated" and source_meta != ("generated", prompt, int(height), int(seed)):
+        raise gr.Error("Generate the source image again after changing prompt, resolution, or seed.")
+
     pixel_handles = list(handles_state or [])
     pixel_targets = list(targets_state or [])
-    if not pixel_handles and mode == "generated":
-        pixel_handles = list(_DEFAULT_HANDLES)
-        pixel_targets = list(_DEFAULT_TARGETS)
-
     if len(pixel_handles) == 0 or len(pixel_handles) != len(pixel_targets):
         raise gr.Error("Click handle and target points on the image first.")
 
@@ -203,11 +240,11 @@ def _run(
     source_pil = None
     source_size = (config.width, config.height)
     if mode == "real":
-        if image is None:
-            raise gr.Error("Real Image mode requires an input image.")
-        source_size = image.size
-        source_pil = pil_to_rgb(image, (config.width, config.height))
+        source_size = source_image.size
+        source_pil = pil_to_rgb(source_image, (config.width, config.height))
         image_tensor = pil_to_tensor(source_pil, str(bundle.device), bundle.dtype)
+    else:
+        source_size = source_image.size
 
     handles = _pixel_to_feature_points(pixel_handles, source_size, config)
     targets = _pixel_to_feature_points(pixel_targets, source_size, config)
@@ -259,21 +296,20 @@ def build_demo() -> gr.Blocks:
 
     with gr.Blocks(title="DragDiffusion Reproduction", css=css) as demo:
         gr.Markdown("# DragDiffusion Reproduction")
-        gr.Markdown(
-            "Upload an image, click a handle point, then click its target point. "
-            "The selected drag is drawn over the image."
-        )
+        gr.Markdown("Prepare a source image, click a handle point, then click its target point.")
 
         handles_state = gr.State([])
         targets_state = gr.State([])
         pending_state = gr.State(None)
+        edit_source_state = gr.State(None)
+        source_meta_state = gr.State(None)
 
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("<div class='work-title'>Input</div>")
                 mode = gr.Radio(
                     choices=[("Generated Image", "generated"), ("Real Image", "real")],
-                    value="real",
+                    value="generated",
                     label="Mode",
                 )
                 image = gr.Image(
@@ -281,12 +317,14 @@ def build_demo() -> gr.Blocks:
                     label="Image upload",
                     sources=["upload"],
                     interactive=True,
+                    visible=False,
                 )
                 prompt = gr.Textbox(value="a photo of a cat", label="Prompt")
 
                 with gr.Row():
                     height = gr.Dropdown([384, 512], value=384, label="Resolution")
                     seed = gr.Number(value=42, precision=0, label="Seed")
+                generate_btn = gr.Button("Generate Source", variant="primary", visible=True)
                 with gr.Row():
                     lora_steps = gr.Slider(0, 80, value=40, step=1, label="LoRA steps")
                     drag_steps = gr.Slider(1, 80, value=80, step=1, label="Drag steps")
@@ -316,31 +354,69 @@ def build_demo() -> gr.Blocks:
                 run_btn = gr.Button("Run Editing", variant="primary", elem_classes=["primary-run"])
                 saved = gr.Textbox(label="Save status", interactive=False)
 
+        mode.change(
+            _mode_changed,
+            inputs=[mode],
+            outputs=[
+                image,
+                generate_btn,
+                edit_view,
+                edit_source_state,
+                handles_state,
+                targets_state,
+                pending_state,
+                source_meta_state,
+                point_readout,
+            ],
+        )
         image.change(
             _sync_image,
             inputs=[image],
-            outputs=[edit_view, handles_state, targets_state, pending_state, point_readout],
+            outputs=[
+                edit_view,
+                edit_source_state,
+                handles_state,
+                targets_state,
+                pending_state,
+                source_meta_state,
+                point_readout,
+            ],
+        )
+        generate_btn.click(
+            _generate_source,
+            inputs=[prompt, height, seed],
+            outputs=[
+                edit_view,
+                edit_source_state,
+                source,
+                handles_state,
+                targets_state,
+                pending_state,
+                source_meta_state,
+                point_readout,
+            ],
         )
         edit_view.select(
             _select_point,
-            inputs=[image, handles_state, targets_state, pending_state],
+            inputs=[edit_source_state, handles_state, targets_state, pending_state],
             outputs=[edit_view, handles_state, targets_state, pending_state, point_readout],
         )
         undo_btn.click(
             _undo_point,
-            inputs=[image, handles_state, targets_state, pending_state],
+            inputs=[edit_source_state, handles_state, targets_state, pending_state],
             outputs=[edit_view, handles_state, targets_state, pending_state, point_readout],
         )
         clear_btn.click(
             _clear_points,
-            inputs=[image],
+            inputs=[edit_source_state],
             outputs=[edit_view, handles_state, targets_state, pending_state, point_readout],
         )
         run_btn.click(
             _run,
             inputs=[
                 mode,
-                image,
+                edit_source_state,
+                source_meta_state,
                 prompt,
                 handles_state,
                 targets_state,
