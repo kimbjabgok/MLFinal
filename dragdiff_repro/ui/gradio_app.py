@@ -30,20 +30,26 @@ def _save_result(result: dict, config: DragConfig) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     image_path = out_dir / "edited_image.png"
+    reconstruction_path = out_dir / "reconstruction.png"
     log_path = out_dir / "run_log.json"
     result["edited_image"].save(image_path)
+    if result.get("reconstruction_image") is not None:
+        result["reconstruction_image"].save(reconstruction_path)
 
     with log_path.open("w", encoding="utf-8") as f:
         json.dump(
             {
                 "tracked_points": result["tracked_points"],
                 "logs": result["logs"],
+                "debug": result.get("debug", {}),
             },
             f,
             ensure_ascii=False,
             indent=2,
         )
 
+    if result.get("reconstruction_image") is not None:
+        return f"Saved: {image_path} / {reconstruction_path} / {log_path}"
     return f"Saved: {image_path} / {log_path}"
 
 
