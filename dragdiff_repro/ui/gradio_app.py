@@ -289,7 +289,7 @@ def build_demo() -> gr.Blocks:
                     seed = gr.Number(value=42, precision=0, label="Seed")
                 with gr.Row():
                     lora_steps = gr.Slider(0, 80, value=40, step=1, label="LoRA steps")
-                    drag_steps = gr.Slider(1, 80, value=30, step=1, label="Drag steps")
+                    drag_steps = gr.Slider(1, 80, value=80, step=1, label="Drag steps")
 
             with gr.Column(scale=1):
                 gr.Markdown("<div class='work-title'>User Edit</div>")

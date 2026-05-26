@@ -17,9 +17,9 @@ class DragConfig:
     lora_batch_size: int = 2
     lora_steps: int = 40
     lora_lr: float = 5e-4
-    drag_steps: int = 30
+    drag_steps: int = 80
     latent_lr: float = 0.01
-    lambda_mask: float = 0.15
+    lambda_mask: float = 0.1
     r1: int = 1
     r2: int = 3
     point_stop_threshold: float = 2.0

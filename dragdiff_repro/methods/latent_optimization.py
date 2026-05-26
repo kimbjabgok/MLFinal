@@ -21,6 +21,26 @@ def _freeze_unet(unet) -> None:
     unet.eval()
 
 
+def _unet_noise_and_feature(
+    bundle: ModelBundle,
+    latents: torch.Tensor,
+    timestep: torch.Tensor,
+    text_embeds: torch.Tensor,
+    feature_size: int,
+    block_index: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    latents = latents.to(device=bundle.device, dtype=bundle.dtype)
+    with capture_up_block_feature(bundle.unet, block_index=block_index) as capture:
+        noise_pred = bundle.unet(latents, timestep, encoder_hidden_states=text_embeds).sample
+    if capture.feature is None:
+        raise RuntimeError("UNet feature hook did not capture an activation.")
+    feature = capture.feature
+    target_size = (feature_size, feature_size)
+    if feature.shape[-2:] != target_size:
+        feature = F.interpolate(feature, size=target_size, mode="bilinear", align_corners=False)
+    return noise_pred, feature
+
+
 def _unet_feature(
     bundle: ModelBundle,
     latents: torch.Tensor,
@@ -29,15 +49,7 @@ def _unet_feature(
     feature_size: int,
     block_index: int,
 ) -> torch.Tensor:
-    latents = latents.to(device=bundle.device, dtype=bundle.dtype)
-    with capture_up_block_feature(bundle.unet, block_index=block_index) as capture:
-        _ = bundle.unet(latents, timestep, encoder_hidden_states=text_embeds).sample
-    if capture.feature is None:
-        raise RuntimeError("UNet feature hook did not capture an activation.")
-    feature = capture.feature
-    target_size = (feature_size, feature_size)
-    if feature.shape[-2:] != target_size:
-        feature = F.interpolate(feature, size=target_size, mode="bilinear", align_corners=False)
+    _, feature = _unet_noise_and_feature(bundle, latents, timestep, text_embeds, feature_size, block_index)
     return feature
 
 
@@ -135,21 +147,23 @@ def optimize_latent(
     log = RunLog()
 
     with torch.no_grad():
-        ref_feature = _unet_feature(
+        ref_noise, ref_feature = _unet_noise_and_feature(
             bundle,
             original_latent_zt,
             timestep,
             text_embeds,
             feature_size,
             feature_block_index,
-        ).detach()
+        )
+        original_prev = bundle.scheduler.step(ref_noise, timestep, original_latent_zt).prev_sample.detach()
+        ref_feature = ref_feature.detach()
         ref_vectors = sample_feature(ref_feature, handle_points).detach()
 
     current_points = list(handle_points)
 
     for step_idx in tqdm(range(config.drag_steps), desc="Latent optimization"):
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
-            feature = _unet_feature(
+            noise_pred, feature = _unet_noise_and_feature(
                 bundle,
                 optimized,
                 timestep,
@@ -168,7 +182,8 @@ def optimize_latent(
                     )
 
             motion_loss = _motion_supervision_loss(feature, current_points, target_points, config.r1)
-            preserve_loss = torch.abs((optimized - original_latent_zt) * (1.0 - mask)).mean()
+            optimized_prev = bundle.scheduler.step(noise_pred, timestep, optimized).prev_sample
+            preserve_loss = torch.abs((optimized_prev - original_prev) * (1.0 - mask)).sum()
             loss = motion_loss + config.lambda_mask * preserve_loss
 
         optimizer.zero_grad(set_to_none=True)
