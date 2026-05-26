@@ -60,12 +60,28 @@ def attach_lora_to_unet(bundle: ModelBundle, config: DragConfig) -> None:
     bundle.pipe.unet.train()
 
 
+def reset_lora_on_unet(bundle: ModelBundle) -> None:
+    unet = bundle.unet
+    if not (hasattr(unet, "peft_config") and unet.peft_config):
+        return
+
+    if hasattr(unet, "unload"):
+        bundle.pipe.unet = unet.unload()
+        bundle.pipe.unet.to(device=bundle.device, dtype=bundle.dtype)
+        bundle.pipe.unet.eval()
+        torch.cuda.empty_cache()
+        return
+
+    raise RuntimeError("Existing LoRA adapter is attached, but this PEFT version cannot unload it.")
+
+
 def finetune_lora(
     bundle: ModelBundle,
     image_latent: torch.Tensor,
     prompt: str,
     config: DragConfig,
 ) -> None:
+    reset_lora_on_unet(bundle)
     attach_lora_to_unet(bundle, config)
     unet = bundle.unet
     unet.train()
@@ -98,11 +114,9 @@ def finetune_lora(
 
         pred = unet(noisy, timestep, encoder_hidden_states=text_embeds).sample
         loss = F.mse_loss(pred.float(), noise.float())
-
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
     unet.eval()
     torch.cuda.empty_cache()
-
