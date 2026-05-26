@@ -34,17 +34,14 @@ def _save_result(result: dict, config: DragConfig) -> str:
     if result.get("reconstruction_image") is not None:
         result["reconstruction_image"].save(reconstruction_path)
 
+    log_data = {
+        "tracked_points": result["tracked_points"],
+        "logs": result["logs"],
+        "debug": result.get("debug", {}),
+    }
+
     with log_path.open("w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "tracked_points": result["tracked_points"],
-                "logs": result["logs"],
-                "debug": result.get("debug", {}),
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+        json.dump(log_data, f, ensure_ascii=False, indent=2)
 
     if result.get("reconstruction_image") is not None:
         return f"Saved: {image_path} / {reconstruction_path} / {log_path}"
@@ -110,14 +107,15 @@ def _mode_changed(mode: str):
         [],
         None,
         None,
+        None,
         message,
     )
 
 
 def _sync_image(image):
     if image is None:
-        return None, None, [], [], None, None, "Upload an image, then click handle and target points."
-    return image, image, [], [], None, ("real",), "Click once for a handle point, then click once for its target point."
+        return None, None, [], [], None, None, None, "Upload an image, then click handle and target points."
+    return image, image, [], [], None, ("real",), None, "Click once for a handle point, then click once for its target point."
 
 
 def _generate_source(prompt: str, height: int, seed: int):
@@ -131,10 +129,17 @@ def _generate_source(prompt: str, height: int, seed: int):
         cpu_offload=False,
     )
     bundle = _get_model(config)
-    image, _ = generate_image_and_latent(bundle, prompt, config)
+    image, cached_latent = generate_image_and_latent(bundle, prompt, config)
     torch.cuda.empty_cache()
+
     source_meta = ("generated", prompt, int(height), int(seed))
-    return image, image, image, [], [], None, source_meta, "Click once for a handle point, then click once for its target point."
+    return (
+        image, image, image,
+        [], [], None,
+        source_meta,
+        cached_latent,
+        "Click once for a handle point, then click once for its target point.",
+    )
 
 
 def _select_point(source_image, handles, targets, pending, evt: gr.SelectData):
@@ -182,10 +187,9 @@ def _pixel_to_feature_points(
 ) -> list[tuple[int, int]]:
     """Convert UI pixel points to feature-map (x, y) coordinates.
 
-    The optimizer keeps public points as (x, y). Feature tensors are still
-    indexed internally as feature[:, :, y, x].
+    Official: point[1]/full_h * sup_res_h, point[0]/full_w * sup_res_w
+    (note official uses [row, col] internally; we use (x, y) throughout)
     """
-
     src_w, src_h = source_size
     feature_size = config.feature_supervision_size
     points_out = []
@@ -202,6 +206,7 @@ def _run(
     mode: str,
     source_image,
     source_meta,
+    cached_latent,
     prompt: str,
     handles_state,
     targets_state,
@@ -237,7 +242,6 @@ def _run(
         raise gr.Error("Click handle and target points on the image first.")
 
     image_tensor = None
-    source_pil = None
     source_size = (config.width, config.height)
     if mode == "real":
         source_size = source_image.size
@@ -258,6 +262,11 @@ def _run(
         device=str(bundle.device),
     )
 
+    # For generated mode, pass the cached latent to avoid regeneration
+    latent_for_request = None
+    if mode == "generated" and cached_latent is not None:
+        latent_for_request = cached_latent
+
     request = EditRequest(
         mode="real" if mode == "real" else "generated",
         image=image_tensor,
@@ -266,13 +275,19 @@ def _run(
         handle_points=handles,
         target_points=targets,
         config=config,
+        cached_latent_zt=latent_for_request,
     )
 
     result = run_dragdiffusion(bundle, request)
     save_message = _save_result(result, config)
     torch.cuda.empty_cache()
 
-    return result.get("source_image", source_pil), result["edited_image"], save_message
+    source_out = result.get("source_image") or source_image
+    recon = result.get("reconstruction_image")
+
+    if mode == "real" and recon is not None:
+        return source_out, recon, result["edited_image"], save_message
+    return source_out, None, result["edited_image"], save_message
 
 
 def build_demo() -> gr.Blocks:
@@ -303,6 +318,7 @@ def build_demo() -> gr.Blocks:
         pending_state = gr.State(None)
         edit_source_state = gr.State(None)
         source_meta_state = gr.State(None)
+        cached_latent_state = gr.State(None)
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -326,7 +342,7 @@ def build_demo() -> gr.Blocks:
                     seed = gr.Number(value=42, precision=0, label="Seed")
                 generate_btn = gr.Button("Generate Source", variant="primary", visible=True)
                 with gr.Row():
-                    lora_steps = gr.Slider(0, 80, value=40, step=1, label="LoRA steps")
+                    lora_steps = gr.Slider(0, 80, value=60, step=1, label="LoRA steps")
                     drag_steps = gr.Slider(1, 80, value=80, step=1, label="Drag steps")
 
             with gr.Column(scale=1):
@@ -350,6 +366,7 @@ def build_demo() -> gr.Blocks:
             with gr.Column(scale=1):
                 gr.Markdown("<div class='work-title'>Result</div>")
                 source = gr.Image(type="pil", label="Source / Generated", interactive=False)
+                reconstruction = gr.Image(type="pil", label="Reconstruction (real mode)", interactive=False, visible=True)
                 edited = gr.Image(type="pil", label="Edited result", interactive=False)
                 run_btn = gr.Button("Run Editing", variant="primary", elem_classes=["primary-run"])
                 saved = gr.Textbox(label="Save status", interactive=False)
@@ -366,6 +383,7 @@ def build_demo() -> gr.Blocks:
                 targets_state,
                 pending_state,
                 source_meta_state,
+                cached_latent_state,
                 point_readout,
             ],
         )
@@ -379,6 +397,7 @@ def build_demo() -> gr.Blocks:
                 targets_state,
                 pending_state,
                 source_meta_state,
+                cached_latent_state,
                 point_readout,
             ],
         )
@@ -393,6 +412,7 @@ def build_demo() -> gr.Blocks:
                 targets_state,
                 pending_state,
                 source_meta_state,
+                cached_latent_state,
                 point_readout,
             ],
         )
@@ -417,6 +437,7 @@ def build_demo() -> gr.Blocks:
                 mode,
                 edit_source_state,
                 source_meta_state,
+                cached_latent_state,
                 prompt,
                 handles_state,
                 targets_state,
@@ -425,7 +446,7 @@ def build_demo() -> gr.Blocks:
                 drag_steps,
                 seed,
             ],
-            outputs=[source, edited, saved],
+            outputs=[source, reconstruction, edited, saved],
         )
 
     return demo

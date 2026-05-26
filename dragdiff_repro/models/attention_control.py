@@ -7,10 +7,28 @@ from typing import Iterator
 import torch
 import torch.nn.functional as F
 
+from dragdiff_repro.config import DragConfig
+
+
 @dataclass
 class ReferenceAttentionController:
+    """Controls K/V sharing between reference and edited latent denoising.
+
+    Official MutualSelfAttentionControl applies to self-attention layers 10-15
+    (up_blocks[2] and up_blocks[3]) from start_step onwards. We replicate this
+    by enabling processors only for those blocks and gating on step index.
+    """
     mode: str = "read"
     kv_bank: dict[str, tuple[torch.Tensor, torch.Tensor]] = field(default_factory=dict)
+    current_step: int = 0
+    start_step: int = 0
+
+    def set_step(self, step: int) -> None:
+        self.current_step = step
+
+    @property
+    def active(self) -> bool:
+        return self.current_step >= self.start_step
 
 
 class ReferenceKVProcessor:
@@ -56,7 +74,7 @@ class ReferenceKVProcessor:
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
 
-        should_swap = self.enabled and not is_cross_attention
+        should_swap = self.enabled and not is_cross_attention and self.controller.active
         if should_swap and self.controller.mode == "write":
             self.controller.kv_bank[self.name] = (key.detach(), value.detach())
         elif should_swap and self.controller.mode == "read" and self.name in self.controller.kv_bank:
@@ -95,16 +113,52 @@ class ReferenceKVProcessor:
         return hidden_states / attn.rescale_output_factor
 
 
+def _map_self_attn_layers(unet) -> dict[str, int]:
+    """Map each self-attention processor name to its global self-attention layer index.
+
+    SD1.5 UNet has 16 self-attention layers total:
+    - down_blocks: 6 layers (indices 0-5)
+    - mid_block: 1 layer (index 6)
+    - up_blocks: 9 layers (indices 7-15)
+      - up_blocks[1]: 3 layers (7-9)
+      - up_blocks[2]: 3 layers (10-12)
+      - up_blocks[3]: 3 layers (13-15)
+
+    Official default: start_layer=10 enables layers 10-15 = up_blocks[2] + up_blocks[3].
+    """
+    layer_map: dict[str, int] = {}
+    self_attn_count = 0
+
+    for name in unet.attn_processors:
+        if "attn1" in name:
+            layer_map[name] = self_attn_count
+            self_attn_count += 1
+
+    return layer_map
+
+
 @contextmanager
-def reference_latent_control(unet) -> Iterator[ReferenceAttentionController]:
-    """Install self-attention K/V swap processors for UNet upsampling blocks."""
+def reference_latent_control(
+    unet,
+    config: DragConfig | None = None,
+) -> Iterator[ReferenceAttentionController]:
+    """Install self-attention K/V swap processors on UNet.
+
+    Official applies to self-attention layers [start_layer, 16) at steps >= start_step.
+    Default start_layer=10 covers up_blocks[2] and up_blocks[3] self-attention.
+    """
+    start_layer = 10 if config is None else config.ref_attn_start_layer
+    start_step = 0 if config is None else config.ref_attn_start_step
 
     original_processors = unet.attn_processors
-    controller = ReferenceAttentionController()
+    controller = ReferenceAttentionController(start_step=start_step)
+
+    layer_map = _map_self_attn_layers(unet)
     processors = {}
 
     for name in original_processors:
-        enabled = "up_blocks.2" in name and "attn1" in name
+        layer_idx = layer_map.get(name, -1)
+        enabled = layer_idx >= start_layer
         processors[name] = ReferenceKVProcessor(name=name, controller=controller, enabled=enabled)
 
     unet.set_attn_processor(processors)

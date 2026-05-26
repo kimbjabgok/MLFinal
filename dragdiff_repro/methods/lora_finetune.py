@@ -56,11 +56,17 @@ def attach_lora_to_unet(bundle: ModelBundle, config: DragConfig) -> None:
         init_lora_weights="gaussian",
         target_modules=["to_q", "to_k", "to_v", "to_out.0"],
     )
+
     bundle.pipe.unet = get_peft_model(bundle.unet, lora_config)
     bundle.pipe.unet.train()
 
 
 def reset_lora_on_unet(bundle: ModelBundle) -> None:
+    """Remove any existing LoRA adapter and restore base UNet weights.
+
+    Called before each real-image Run Editing to prevent LoRA accumulation
+    across repeated runs. This ensures each run starts from the same base model.
+    """
     unet = bundle.unet
     if not (hasattr(unet, "peft_config") and unet.peft_config):
         return
@@ -81,6 +87,14 @@ def finetune_lora(
     prompt: str,
     config: DragConfig,
 ) -> None:
+    """Identity-preserving LoRA fine-tuning (Paper Section 3.2).
+
+    Official: LoRA rank 16, batch 4, 80 steps, lr 5e-4, AdamW.
+    T4 downgrade: rank 8, batch 2, 60 steps (configurable).
+
+    Seed-based generator ensures reproducibility: same input image + seed
+    produces the same LoRA weights across runs.
+    """
     reset_lora_on_unet(bundle)
     attach_lora_to_unet(bundle, config)
     unet = bundle.unet
@@ -102,17 +116,28 @@ def finetune_lora(
     image_latent_batch = image_latent.repeat(batch_size, 1, 1, 1)
     text_embeds = text_embeds.repeat(batch_size, 1, 1)
 
+    # Seed-based generator for reproducible noise sampling
+    generator = torch.Generator(device=bundle.device).manual_seed(config.seed)
+
     for _ in tqdm(range(config.lora_steps), desc="LoRA fine-tuning"):
         timestep = torch.randint(
             0,
             train_scheduler.config.num_train_timesteps,
             (batch_size,),
             device=bundle.device,
+            generator=generator,
         ).long()
-        noise = torch.randn_like(image_latent_batch)
+
+        noise = torch.randn(
+            image_latent_batch.shape,
+            device=bundle.device,
+            dtype=image_latent_batch.dtype,
+            generator=generator,
+        )
         noisy = train_scheduler.add_noise(image_latent_batch, noise, timestep)
 
         pred = unet(noisy, timestep, encoder_hidden_states=text_embeds).sample
+
         loss = F.mse_loss(pred.float(), noise.float())
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
