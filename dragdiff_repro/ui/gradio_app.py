@@ -28,11 +28,8 @@ def _save_result(result: dict, config: DragConfig) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     image_path = out_dir / "edited_image.png"
-    reconstruction_path = out_dir / "reconstruction.png"
     log_path = out_dir / "run_log.json"
     result["edited_image"].save(image_path)
-    if result.get("reconstruction_image") is not None:
-        result["reconstruction_image"].save(reconstruction_path)
 
     log_data = {
         "tracked_points": result["tracked_points"],
@@ -43,8 +40,6 @@ def _save_result(result: dict, config: DragConfig) -> str:
     with log_path.open("w", encoding="utf-8") as f:
         json.dump(log_data, f, ensure_ascii=False, indent=2)
 
-    if result.get("reconstruction_image") is not None:
-        return f"Saved: {image_path} / {reconstruction_path} / {log_path}"
     return f"Saved: {image_path} / {log_path}"
 
 
@@ -283,11 +278,7 @@ def _run(
     torch.cuda.empty_cache()
 
     source_out = result.get("source_image") or source_image
-    recon = result.get("reconstruction_image")
-
-    if mode == "real" and recon is not None:
-        return source_out, recon, result["edited_image"], save_message
-    return source_out, None, result["edited_image"], save_message
+    return source_out, result["edited_image"], save_message
 
 
 def build_demo() -> gr.Blocks:
@@ -366,7 +357,6 @@ def build_demo() -> gr.Blocks:
             with gr.Column(scale=1):
                 gr.Markdown("<div class='work-title'>Result</div>")
                 source = gr.Image(type="pil", label="Source / Generated", interactive=False)
-                reconstruction = gr.Image(type="pil", label="Reconstruction (real mode)", interactive=False, visible=True)
                 edited = gr.Image(type="pil", label="Edited result", interactive=False)
                 run_btn = gr.Button("Run Editing", variant="primary", elem_classes=["primary-run"])
                 saved = gr.Textbox(label="Save status", interactive=False)
@@ -446,7 +436,7 @@ def build_demo() -> gr.Blocks:
                 drag_steps,
                 seed,
             ],
-            outputs=[source, reconstruction, edited, saved],
+            outputs=[source, edited, saved],
         )
 
     return demo

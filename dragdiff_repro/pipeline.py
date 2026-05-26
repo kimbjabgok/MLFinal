@@ -108,7 +108,6 @@ def denoise_from_timestep(
 
 def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
     config = request.config
-    reconstruction_image = None
 
     if request.mode == "generated":
         if request.cached_latent_zt is not None:
@@ -141,16 +140,6 @@ def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
         source_image = tensor_to_pil(request.image)
         guidance_scale = config.guidance_scale_real
 
-        reconstruction_image = denoise_from_timestep(
-            bundle=bundle,
-            latents=original_latent_zt,
-            reference_latents=original_latent_zt,
-            prompt=request.prompt,
-            start_index=denoise_start_index,
-            guidance_scale=guidance_scale,
-            config=config,
-        )
-
     optimized_latent, log = optimize_latent(
         bundle=bundle,
         latent_zt=latent_zt,
@@ -177,7 +166,6 @@ def run_dragdiffusion(bundle: ModelBundle, request: EditRequest) -> dict:
     return {
         "source_image": source_image,
         "edited_image": edited_image,
-        "reconstruction_image": reconstruction_image,
         "tracked_points": log.point_history[-1] if log.point_history else request.handle_points,
         "logs": log.to_dict(),
         "debug": {
