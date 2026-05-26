@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=DragConfig.height)
     parser.add_argument("--width", type=int, default=DragConfig.width)
     parser.add_argument("--num-ddim-steps", type=int, default=DragConfig.num_ddim_steps)
-    parser.add_argument("--target-timestep-index", type=int, default=DragConfig.target_timestep_index)
+    parser.add_argument("--inversion-steps", type=int, default=DragConfig.inversion_steps)
     parser.add_argument("--guidance-scale", type=float, default=DragConfig.guidance_scale_real)
     parser.add_argument("--skip-lora", action="store_true")
     return parser.parse_args()
@@ -70,7 +70,7 @@ def main() -> None:
         height=args.height,
         width=args.width,
         num_ddim_steps=args.num_ddim_steps,
-        target_timestep_index=args.target_timestep_index,
+        inversion_steps=args.inversion_steps,
         guidance_scale_real=args.guidance_scale,
     )
     bundle = load_model_bundle(config)
@@ -86,7 +86,7 @@ def main() -> None:
         bundle,
         latent_z0,
         args.prompt,
-        config.target_timestep_index,
+        config.inversion_steps,
         guidance_scale=config.guidance_scale_real,
         return_intermediates=True,
     )

@@ -235,15 +235,12 @@ def optimize_latent(
             else:
                 loss = motion_loss
 
-        optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_([optimized], max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
+        optimizer.zero_grad(set_to_none=True)
 
         with torch.no_grad():
-            optimized.copy_(torch.nan_to_num(optimized, nan=0.0, posinf=1.0, neginf=-1.0).clamp(-10.0, 10.0))
             log.loss_history.append(float(loss.detach().cpu()))
             log.point_history.append(list(current_points))
 

@@ -82,8 +82,8 @@ def denoise_from_timestep(
     Our implementation processes them sequentially (write K/V, then read)
     to halve peak memory on T4.
     """
-    current = torch.nan_to_num(latents.detach(), nan=0.0, posinf=1.0, neginf=-1.0)
-    reference_current = torch.nan_to_num(reference_latents.detach(), nan=0.0, posinf=1.0, neginf=-1.0)
+    current = latents.detach()
+    reference_current = reference_latents.detach()
     timesteps = bundle.scheduler.timesteps[start_index:]
 
     with reference_latent_control(bundle.unet, config=config) as controller:
@@ -95,12 +95,10 @@ def denoise_from_timestep(
             controller.kv_bank.clear()
             reference_noise = predict_noise(bundle, reference_current, timestep, prompt, guidance_scale)
             reference_current = bundle.scheduler.step(reference_noise, timestep, reference_current).prev_sample
-            reference_current = torch.nan_to_num(reference_current, nan=0.0, posinf=1.0, neginf=-1.0)
 
             controller.mode = "read"
             noise_pred = predict_noise(bundle, current, timestep, prompt, guidance_scale)
             current = bundle.scheduler.step(noise_pred, timestep, current).prev_sample
-            current = torch.nan_to_num(current, nan=0.0, posinf=1.0, neginf=-1.0)
 
     image_tensor = latent_to_image(bundle, current)
     return tensor_to_pil(image_tensor)
