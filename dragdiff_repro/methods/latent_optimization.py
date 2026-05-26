@@ -27,9 +27,10 @@ def _unet_feature(
     timestep: torch.Tensor,
     text_embeds: torch.Tensor,
     feature_size: int,
+    block_index: int,
 ) -> torch.Tensor:
     latents = latents.to(device=bundle.device, dtype=bundle.dtype)
-    with capture_up_block_feature(bundle.unet, block_index=2) as capture:
+    with capture_up_block_feature(bundle.unet, block_index=block_index) as capture:
         _ = bundle.unet(latents, timestep, encoder_hidden_states=text_embeds).sample
     if capture.feature is None:
         raise RuntimeError("UNet feature hook did not capture an activation.")
@@ -123,6 +124,7 @@ def optimize_latent(
     timestep = bundle.scheduler.timesteps[active_timestep_index].to(bundle.device)
     text_embeds = encode_prompt(bundle, prompt)
     feature_size = config.feature_supervision_size
+    feature_block_index = config.unet_feature_block_index
 
     optimized = latent_zt.detach().clone().float().requires_grad_(True)
     original_latent_zt = original_latent_zt.detach().float()
@@ -133,14 +135,28 @@ def optimize_latent(
     log = RunLog()
 
     with torch.no_grad():
-        ref_feature = _unet_feature(bundle, original_latent_zt, timestep, text_embeds, feature_size).detach()
+        ref_feature = _unet_feature(
+            bundle,
+            original_latent_zt,
+            timestep,
+            text_embeds,
+            feature_size,
+            feature_block_index,
+        ).detach()
         ref_vectors = sample_feature(ref_feature, handle_points).detach()
 
     current_points = list(handle_points)
 
     for step_idx in tqdm(range(config.drag_steps), desc="Latent optimization"):
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
-            feature = _unet_feature(bundle, optimized, timestep, text_embeds, feature_size)
+            feature = _unet_feature(
+                bundle,
+                optimized,
+                timestep,
+                text_embeds,
+                feature_size,
+                feature_block_index,
+            )
 
             if step_idx != 0:
                 with torch.no_grad():
